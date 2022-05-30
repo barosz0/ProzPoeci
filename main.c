@@ -1,67 +1,54 @@
-#include <mpi.h>
+
 #include <stdlib.h>
 #include <stdio.h>
 #include "Poeta.c"
+#include "Wolontariusz.c"
 #include <unistd.h>
-#include <time.h>
+#include "Global.h"
+#include <pthread.h>
 
+pthread_t Kom, Main;
 
-int size,rank;
-
-int poeci_offset;
-
-struct Msg{
-    int od;
-    int Flag;
-};
-
-void wait(int ms)
-{
-    //printf("Czekam %d ms", ms);
-    clock_t t;
-    t = clock();
-    
-    double wait_time =  CLOCKS_PER_SEC * (ms/1000.0);
-
-    while(clock() < (double)t+wait_time);
-}
-
-int rand_num(int min, int max)
-{
-    return rand()%(max - min) + min;
-}
-
-int choice(int perc) // taki niby bool
-{
-    if(perc >= 100)
-        return 1;
-    int los = rand_num(1,100);
-    //printf("los : %d\n",los);
-
-    return los <=perc;
-}
-    
-void poeta_Komunikacja()
-{
-
-}
-
-void poeta_main()
-{
-
-    printf("Poeta nr %d zaczyna\n",rank-poeci_offset);
-
-    if(choice(10))
-    {
-        printf("%d zaprasza \n",rank - poeci_offset);
-    }
-
-}
 
 void wolonatariusz_main()
 {
-    printf("Wolontariusz nr %d zaczyna\n",rank);
+    printf("Wolontariusz nr %d zaczyna\n",mpi_rank);
 
+}
+
+void poeta_Init()
+{
+    
+    poeta_stan = IN_WAIT_STATUS;
+    alkohol = 0;
+    zagrycha = 0;
+    sepienie = 0;
+
+    party_tab = NULL;
+
+    pthread_create(&Kom, NULL, poeta_Komunikacja, 0);
+    //pthread_create(&PoetaMain, NULL, poeta_main, 0);
+    
+    poeta_main(NULL);
+}
+
+void wolontariusz_Init()
+{
+    queue_rank = (int*)malloc(sizeof(int)*(poeci_offset));
+    queue_lamport = (int*)malloc(sizeof(int)*(poeci_offset));
+
+    for(int i=0;i<poeci_offset;i++)
+    {
+        queue_rank[i] = -1;
+        queue_lamport[i] = -1;
+    }
+
+    wolontariusz_stan = IN_WAIT_STATUS;
+    pthread_create(&Kom, NULL, wolontariusz_Komunikacja, 0);
+
+
+
+    wolontariusz_main(NULL);
 }
 
 
@@ -69,20 +56,32 @@ int main(int argc, char **argv)
 {
     MPI_Init(&argc, &argv);
 
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
 
     //wait(200*rank);
 
-    srand(time(NULL)+rank*20); 
+    srand(123214+mpi_rank*20); //time(NULL)
 
     poeci_offset = 3;
+    lamport_clock = 0;
 
-    if(rank < poeci_offset)
-        wolonatariusz_main();
+    if(mpi_rank < poeci_offset)
+        // wolontariusz_Init();
+        wolontariusz_main(NULL);
     else
-        poeta_main();
+        poeta_Init();
+
+    //void **retval;
+
+    // pthread_join(PoetaMain,retval);
+    //pthread_join(PoetaKom,retval);
+
+    while(1);
 
     MPI_Finalize();
 }
+
+//mpicc main.c -pthread
+//mpirun -np 10 --oversubscribe a.out
 
