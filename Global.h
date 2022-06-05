@@ -23,7 +23,7 @@ struct Msg{
     int lamport;
     int flag;
     double data[3];
-};
+};//__attribute__((aligned(64)));
 
 int max(int a, int b)
 {

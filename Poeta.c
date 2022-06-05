@@ -472,7 +472,7 @@ void party_host()
     printf("Otrzymalem potwierdzenie zakonczenia libacji od procesow\n");
     
     //zamowienie wolontariusza
-    //sprzatanie();
+    sprzatanie();
 
     // wysylanie informacji o zakonczeniu imprezy
     for(int i = poeci_offset;i<mpi_size; i++)
