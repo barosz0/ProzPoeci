@@ -24,13 +24,6 @@ int alkohol;
 int zagrycha;
 int sepienie;
 
-
-
-int rand_num(int min, int max)
-{
-    return rand()%(max - min) + min;
-}
-
 int choice(int perc) // taki niby bool
 {
     if(perc >= 100)
@@ -39,6 +32,16 @@ int choice(int perc) // taki niby bool
     //printf("los : %d\n",los);
 
     return los <=perc;
+}
+
+void wait_till(int ms, int status)
+{
+    clock_t t;
+    t = clock();
+    
+    double wait_time =  CLOCKS_PER_SEC * (ms/1000.0);
+
+    while((clock() < (double)t+wait_time) && (poeta_stan != status));
 }
 
 void send_msg(struct Msg* msg, int destination, int tag)
@@ -50,7 +53,7 @@ void send_msg(struct Msg* msg, int destination, int tag)
     pthread_mutex_unlock( &lamportMut );
     int ret = MPI_Send(msg,sizeof(*msg),MPI_BYTE,destination, tag, MPI_COMM_WORLD);
 
-    printf("Ja %d wyslalem wiadomosc do %d z tagiem %d z flaga %d efekt %d\n",mpi_rank,destination,tag,msg -> flag,ret);
+    //printf("Ja %d wyslalem wiadomosc do %d z tagiem %d z flaga %d efekt %d\n",mpi_rank,destination,tag,msg -> flag,ret);
 }
 
 void recive_invite(struct Msg m)
@@ -62,14 +65,14 @@ void recive_invite(struct Msg m)
     if(poeta_stan == IN_PARTY_STATUS)
     {
         odp.data[0] = 0;
-        printf("Ja %d odrzucilem zaproszenie od %d - juz imprezuje\n",mpi_rank,m.sender);
+        printf("[P][%d][%d] Odrzucam zaproszenie od %d - juz imprezuje\n",mpi_rank,lamport_clock,m.sender);
     }
     else
     {
-        if(choice(50))
+        if(choice(PRAWDOPODOBIENSTWO_PRZYJECIA_ZAPROSZENIA))
         {    
             odp.data[0] = 1;
-            printf("Ja %d przyjalem zaproszenie od %d\n",mpi_rank,m.sender);
+            printf("[P][%d][%d] Przyjalem zaproszenie od %d\n",mpi_rank,lamport_clock,m.sender);
             //change status na zaproszony
             poeta_stan = IN_PARTY_STATUS;
             party_creator = m.sender;
@@ -77,7 +80,7 @@ void recive_invite(struct Msg m)
         else
         {
             odp.data[0] = 0;
-            printf("Ja %d odrzucilem zaproszenie od %d\n",mpi_rank,m.sender);
+            printf("[P][%d][%d] Odrzucam zaproszenie od %d\n",mpi_rank,lamport_clock,m.sender);
         }
     }
     pthread_mutex_unlock( &stateMut );
@@ -92,6 +95,7 @@ void *poeta_Komunikacja(void *ptr)
 {
     MPI_Status status;
     struct Msg rec;
+    printf("[P][%d][%d] Startuje watek komunikacyjny",mpi_rank,lamport_clock);
 
     while(1+1){
 
@@ -100,16 +104,17 @@ void *poeta_Komunikacja(void *ptr)
         lamport_clock= max(lamport_clock,rec.lamport)+1;
         pthread_mutex_unlock( &lamportMut );
 
-        printf("Ja %d otrzymalem od %d flage %d\n",mpi_rank,rec.sender,rec.flag);
+        //printf("Ja %d otrzymalem od %d flage %d\n",mpi_rank,rec.sender,rec.flag);
         switch (rec.flag)
         {
         case INV_FLAG:
-            printf("Otrzymana zaproszenie %d\n", mpi_rank);
+            //printf("Otrzymana zaproszenie %d\n", mpi_rank);
+            printf("[P][%d][%d] Otrzymalem zaproszenie od %d\n",mpi_rank,lamport_clock,rec.sender);
             recive_invite(rec);
         break;
 
         default:
-            printf("Odebrano wiadomosc od %d z flaga %d",rec.sender,rec.flag);
+            //printf("Odebrano wiadomosc od %d z flaga %d",rec.sender,rec.flag);
             break;
         }
     }
@@ -117,6 +122,8 @@ void *poeta_Komunikacja(void *ptr)
 
 int send_invite()
 {
+    printf("[P][%d][%d] Wysylam zaproszenie na libacje\n",mpi_rank,lamport_clock);
+
     struct Msg inv;
     inv.flag = INV_FLAG;
     for(int i = poeci_offset;i<mpi_size; i++)
@@ -135,14 +142,12 @@ int send_invite()
     for(int i = poeci_offset;i<mpi_size; i++)
     {
         if(i==mpi_rank) continue; // nie odbieram od siebie
-        printf("Czekam na odpowiedź od %d\n",i);
         MPI_Recv(&rec,sizeof(rec),MPI_BYTE,i, PARTY_TAG, MPI_COMM_WORLD, &status);
         //printf("ODP od %d %d %d\n",rec.sender,(int)rec.data[0],party_tab[i-poeci_offset]);
         pthread_mutex_lock( &lamportMut );
         lamport_clock= max(lamport_clock,rec.lamport)+1;
         pthread_mutex_unlock( &lamportMut );
         
-        printf("Mam odpowiedź od %d\n",i);
 
         if(rec.flag == INV_ODP_FLAG)
         {
@@ -154,17 +159,18 @@ int send_invite()
             party_tab[i-poeci_offset]=0;
         }
     }
-    printf("Mam wszystkie zaproszenia\n");
 
     int count = 0;
 
     for(int i=0;i<mpi_size-poeci_offset;i++)
     {
-        printf("%d ",party_tab[i]);
+        //printf("%d ",party_tab[i]);
         if(party_tab[i])
             count++;
     }
-    printf("count %d\n",count);
+    //printf("count %d\n",count);
+    printf("[P][%d][%d] Mam wszystkie odpowiedzi, przyjelo %d poetow\n",mpi_rank,lamport_clock,count);
+    
     if(count>3)
         return count;
     else
@@ -178,12 +184,15 @@ int send_invite()
 
 void odpocznij_po_party()
 {
-    int time = rand_num(300,1000);
+    int time = rand_num(time_odpoczynek[0],time_odpoczynek[1]);
+    printf("[P][%d][%d] Odpoczywam po libacji przez %d ms\n",mpi_rank,lamport_clock,time);
     wait(time);
+    printf("[P][%d][%d] Koniec odpoczynku\n",mpi_rank,lamport_clock);
 }
 
 void cancel_party()
 {
+    printf("[P][%d][%d] Anuluje libacje\n",mpi_rank,lamport_clock);
     for(int i = poeci_offset;i<mpi_size; i++)
     {
         if(i==mpi_rank)
@@ -200,7 +209,7 @@ void cancel_party()
 void sprzatanie()
 {
 
-    printf("Zamawiam wolontariusza\n");
+    printf("[P][%d][%d] Zamawiam sprzatanie\n",mpi_rank,lamport_clock);
     struct Msg msg;
     msg.sender = mpi_rank;
     msg.flag = MAKE_ORDER_FLAG;
@@ -219,7 +228,6 @@ void sprzatanie()
             // wysyla wiadomosc do wszystkich wolontariuszy
             MPI_Send(&msg,sizeof(msg),MPI_BYTE,i, GLOBAL_TAG, MPI_COMM_WORLD);
         }
-        printf("Wyslane podania\n");
         for(int i=0;i<poeci_offset;i++)
         {
 
@@ -231,7 +239,6 @@ void sprzatanie()
             lamport_clock= max(lamport_clock,rec.lamport)+1;
             pthread_mutex_unlock( &lamportMut );
 
-            printf("Otrzymana odpowiedz od %d z flaga %d\n",rec.sender,rec.data[0]);
 
             if(rec.data[0])
             {
@@ -240,7 +247,7 @@ void sprzatanie()
         }
 
         if(flag){
-            printf("Nie udana proba zamownia sprzatania\n");
+            //printf("Nie udana proba zamownia sprzatania\n");
             wait(100); // zeby nie sypal wiadomosciami
         }
     }
@@ -248,17 +255,26 @@ void sprzatanie()
     MPI_Status status;
     struct Msg rec;
     MPI_Recv(&rec,sizeof(rec),MPI_BYTE,MPI_ANY_SOURCE, PARTY_TAG, MPI_COMM_WORLD, &status);
+    pthread_mutex_lock( &lamportMut );
+    lamport_clock= max(lamport_clock,rec.lamport)+1;
+    pthread_mutex_unlock( &lamportMut );
 
-    printf("Posprzatac ma %d zajmie mu to %d\n",rec.sender,rec.data[0]);
+    
+    printf("[P][%d][%d] Do sprzatania zglosil sie %d zajmie mu to %d ms\n",mpi_rank,lamport_clock,rec.sender,(int)rec.data[0]);
 
 
     MPI_Recv(&rec,sizeof(rec),MPI_BYTE,MPI_ANY_SOURCE, PARTY_TAG, MPI_COMM_WORLD, &status);
+    pthread_mutex_lock( &lamportMut );
+    lamport_clock= max(lamport_clock,rec.lamport)+1;
+    pthread_mutex_unlock( &lamportMut );
 
-    printf("Zostalo posprzatane\n");
+    printf("[P][%d][%d] Otrzymalem informacje o zakonczeniu sprzatania\n",mpi_rank,lamport_clock);
 }
 
 void party_host()
 {
+    
+    printf("[P][%d][%d] Wysylam potwierdzenie ze impreza sie odbedzie\n",mpi_rank,lamport_clock);
     // synchronizacja startowa aka informacja ze libacja sie odbedzie
     for(int i = poeci_offset;i<mpi_size; i++)
     {
@@ -278,6 +294,8 @@ void party_host()
 
     int wartosci[mpi_size-poeci_offset][3];
 
+    printf("[P][%d][%d] Czekam na widomosci o procesow z informacja\n",mpi_rank,lamport_clock);
+
     // Zebeanie liczb od procesow
     for(int i = poeci_offset;i<mpi_size; i++)
     {
@@ -289,7 +307,7 @@ void party_host()
         }
         if(party_tab[i-poeci_offset])
         {
-            printf("Czekam na wiadomosc od %d\n",i);
+
             MPI_Recv(&rec,sizeof(rec),MPI_BYTE,i, PARTY_TAG, MPI_COMM_WORLD, &status);
             pthread_mutex_lock( &lamportMut );
             lamport_clock= max(lamport_clock,rec.lamport)+1;
@@ -310,7 +328,8 @@ void party_host()
         }
 
     }
-
+    
+    printf("[P][%d][%d] Odebralem dane od procesow, teraz szukam ofiar\n",mpi_rank,lamport_clock);
     // szukam ofiar
 
     double min_stosunek = 0;
@@ -359,8 +378,8 @@ void party_host()
     }
 
     // wybieram osobe do alkocholu
-    int stosunekA;
-    int stosunekB;
+    double stosunekA;
+    double stosunekB;
 
     // ustawiam tak aby mlodszy proces byl procesem A
     if(ofiary[0] > ofiary[1])
@@ -373,21 +392,30 @@ void party_host()
     if(wartosci[ofiary[0]-poeci_offset][2]==0)
         stosunekA = 1;
     else
-        stosunekA = wartosci[ofiary[0]-poeci_offset][0]/wartosci[ofiary[0]-poeci_offset][2];
+        stosunekA = wartosci[ofiary[0]-poeci_offset][0]/(double)wartosci[ofiary[0]-poeci_offset][2];
     
     if(wartosci[ofiary[1]-poeci_offset][2]==0)
         stosunekB = 1;
     else
-        stosunekB = wartosci[ofiary[1]-poeci_offset][0]/wartosci[ofiary[1]-poeci_offset][2];
+        stosunekB = wartosci[ofiary[1]-poeci_offset][0]/(double)wartosci[ofiary[1]-poeci_offset][2];
 
 
-    printf("Ofiary to %d %d\n", ofiary[0],ofiary[1]);
+    //printf("Ofiary to %d %d\n", ofiary[0],ofiary[1]);
+
+    
+    
+    
     if(stosunekB < stosunekA)
     {
         int pom = ofiary[1];
         ofiary[1] = ofiary[0];
         ofiary[0] = pom;
     }
+
+    printf("[P][%d][%d] ofiary to %d i %d\n",mpi_rank,lamport_clock, ofiary[0], ofiary[1]);
+    printf("[P][%d][%d] alkochol przynosi %d\n",mpi_rank,lamport_clock,ofiary[0]);
+    printf("[P][%d][%d] zagryche przynosi %d\n",mpi_rank,lamport_clock,ofiary[1]);
+
 
     // wysylanie informacji o alkocholu
     if(ofiary[0]== mpi_rank)
@@ -433,7 +461,9 @@ void party_host()
 
     }
 
-    int party_time = rand_num(200,2000);
+    int party_time = rand_num(time_party[0],time_party[1]);
+
+    printf("[P][%d][%d] Losuje czas libacji %d\n",mpi_rank,lamport_clock,party_time);
 
     // wysylanie czasu libacji
     for(int i = poeci_offset;i<mpi_size; i++)
@@ -450,7 +480,7 @@ void party_host()
     }
 
     // libacja
-    printf("Trwa libacja %d przez %d\n",mpi_rank,party_time);
+    printf("[P][%d][%d] Trwa libacja przez %d\n",mpi_rank,lamport_clock,party_time);
     wait(party_time);
 
     // oczekuje az procesy zakoncza libacje
@@ -469,12 +499,14 @@ void party_host()
                 printf("----- ERROR - Nieodpowiednia flaga party - end (%d) \n", rec.flag);
         }
     }
-    printf("Otrzymalem potwierdzenie zakonczenia libacji od procesow\n");
+    printf("[P][%d][%d] Otrzymalem od wszystkich procesow informacje o zakonczeniu libacji\n",mpi_rank,lamport_clock);
     
     //zamowienie wolontariusza
     sprzatanie();
 
-    // wysylanie informacji o zakonczeniu imprezy
+    printf("[P][%d][%d] Wysylam informacje o zakonczeniu sprzatania \n",mpi_rank,lamport_clock);
+
+    // wysylanie informacji o zakonczeniu sprzatania i imprezy
     for(int i = poeci_offset;i<mpi_size; i++)
     {
         if(i==mpi_rank)
@@ -501,7 +533,7 @@ int party()
 
     if(rec.flag == PARTY_INFO_FLAG)
     {
-        printf("Ja %d otrzymalem potwierdzenie\n",mpi_rank);
+        printf("[P][%d][%d] Otrzymalem potwierdzenie odbycia sie imprezy\n",mpi_rank,lamport_clock);
 
     }
     else if(rec.flag == PARTY_END_FLAG)
@@ -515,6 +547,9 @@ int party()
 
 
     {
+    printf("[P][%d][%d] Wysylam moje dane to organizatora |%d|%d|%d|\n",
+                            mpi_rank,lamport_clock,alkohol,zagrycha,sepienie);
+
     struct Msg msg;
 
     msg.data[0] = alkohol;
@@ -537,14 +572,29 @@ int party()
 
     if(rec.flag == PARTY_INFO_FLAG)
     {
+        char* funkcja = "NULL";
         if(rec.data[0]==ALKOHOL)
-            alkohol++;
+            {
+                alkohol++;
+                funkcja = "Alkochol";
+            }
         else if(rec.data[0] == ZAGRYCHA)
-            zagrycha++;
+            {
+                zagrycha++;
+                funkcja = "Zagrycha";
+                
+            }
         else if(rec.data[0] == SEPIENIE)
-            sepienie++;
+            {
+                sepienie++;
+                funkcja = "Nic";
+            }
         else
             printf("-----ERROR - Odebrano nieodpowiedni typ wykonywanej funkcji \n");
+
+        printf("[P][%d][%d] odebralem funkcje: %s moje dane:|%d|%d|%d|\n",
+                            mpi_rank,lamport_clock,funkcja,alkohol,zagrycha,sepienie);
+        
     }
     else
     {
@@ -559,6 +609,8 @@ int party()
     lamport_clock= max(lamport_clock,rec.lamport)+1;
     pthread_mutex_unlock( &lamportMut );
 
+        
+
     int party_time = 0;
 
     if(rec.flag == PARTY_INFO_FLAG)
@@ -569,9 +621,10 @@ int party()
     {
         printf("-----ERROR - Nieodpowiedni tag w odebranej wiadomosci (PARTY_odbieranie_czasu)\n");
     }
+    printf("[P][%d][%d] Odebralem czas trwania libacji %d ms\n",mpi_rank,lamport_clock, party_time);
 
     // libacja
-    printf("Trwa libacja %d przez %d\n",mpi_rank,party_time);
+    printf("[P][%d][%d] Trwa libacja przez %d\n",mpi_rank,lamport_clock,party_time);
     wait(party_time);
     
     struct Msg msg;
@@ -582,7 +635,7 @@ int party()
     send_msg(&msg,party_creator,PARTY_TAG);
 
 
-    printf("Ja %d czekam na iformacje ze pokoj posprzatany\n",mpi_rank);
+    printf("[P][%d][%d] Czekam na informacje o posprzataniu pokoju\n",mpi_rank,lamport_clock);
     // czekam na iformacje ze pokoj posprzatany
     MPI_Recv(&rec,sizeof(rec),MPI_BYTE,party_creator, PARTY_TAG, MPI_COMM_WORLD, &status);
     pthread_mutex_lock( &lamportMut );
@@ -591,6 +644,7 @@ int party()
 
     if(rec.flag == PARTY_END_FLAG)
     {
+        printf("[P][%d][%d] Odebralem informacje o posprzataniu pokoju\n",mpi_rank,lamport_clock);
         return 1;
     }
     else
@@ -605,12 +659,17 @@ int party()
 void *poeta_main(void *ptr)
 {
 
-    printf("Poeta nr %d zaczyna\n",mpi_rank);
+    printf("[P][%d][%d] Startuje watek glowny\n",mpi_rank,lamport_clock);
 
     while(2+2){
-        if(mpi_rank == 4)//choice(30)
+
+        int wait_time = rand_num(time_miedzy_obrotami_poeta[0],time_miedzy_obrotami_poeta[1]);
+        //printf("Czekam %d\n",wait_time);
+        wait_till(wait_time,IN_PARTY_STATUS);
+
+        if(choice(PRAWDOPODOBIENSTWO_ZAPROSZENIA)) //(mpi_rank == 4)//
         {
-            printf("%d zaprasza \n",mpi_rank - poeci_offset);
+            
             pthread_mutex_lock( &stateMut );
             if(poeta_stan == IN_WAIT_STATUS)
             {
@@ -619,13 +678,13 @@ void *poeta_main(void *ptr)
 
                 if(send_invite())
                 {
-                    printf("Mozna zaczynac impreze. \n");
+                    printf("[P][%d][%d] Zaproszenie przyjelo wystarczajaco gosci\n",mpi_rank,lamport_clock);
                     party_host();
-                    //odpocznij_po_party();
+                    odpocznij_po_party();
                 }
                 else
                 {
-                    printf("Nie wystarczajaco gosci\n");
+                    printf("[P][%d][%d] Nie wystarczajaco gosci aby zaczac impreze\n",mpi_rank,lamport_clock);
                     cancel_party();
                     
                 }
@@ -650,16 +709,19 @@ void *poeta_main(void *ptr)
         if(poeta_stan == IN_PARTY_STATUS) // mutex nie potrzebny bo z tego stanu i tak nie zmienia sie
         {
             int odb = party();
-            printf("Ja %d koncze party\n",mpi_rank);
-            //odpocznij_po_party();
+            printf("[P][%d][%d] Koncze libacje\n",mpi_rank,lamport_clock);
+            if(odb)
+            {
+                odpocznij_po_party();
+            }
             party_creator = -1;
             pthread_mutex_lock( &stateMut );
             poeta_stan = IN_WAIT_STATUS;
             pthread_mutex_unlock( &stateMut );
         }
-        printf("Koniec obrotu %d moj stan to: %d\n", mpi_rank, poeta_stan);
-        wait(2000);
+        printf("[P][%d][%d] Koncze obrot -- DEBUGHELP\n",mpi_rank,lamport_clock);
+        // wait(2000); 
     }
 }
 
-//mpirun -np 10 --oversubscribe xterm -e gdb -ex run -ex y a.out
+//mpirun -np 10 --oversubscribe xterm -e gdb -ex run a.out

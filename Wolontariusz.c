@@ -18,6 +18,7 @@ int zleceniodawca = -1;
 
 void sing_up()
 {
+    printf("[W][%d][%d] zapisuje sie do listy\n",mpi_rank,lamport_clock);
     struct Msg msg;
     msg.sender = mpi_rank;
     msg.flag = SING_UP_FLAG;
@@ -121,7 +122,8 @@ int check_first(int rank, int lamp)
 
 int try_take_order()
 {
-    printf("Ja %d probuje |%d|%d|%d|\n",mpi_rank,queue_rank[0],queue_rank[1],queue_rank[2]);
+    //printf("Ja %d probuje |%d|%d|%d|\n",mpi_rank,queue_rank[0],queue_rank[1],queue_rank[2]);
+    printf("[W][%d][%d] probuje zabrac zlecenie od %d\n",mpi_rank,lamport_clock,zleceniodawca);
     struct Msg msg;
     msg.sender = mpi_rank;
     msg.flag = FIRST_CHECK_FLAG;
@@ -166,6 +168,7 @@ int try_take_order()
 
     if(flag)
     {
+        printf("[W][%d][%d] Zajmuje sie zleceniem od %d\n",mpi_rank,lamport_clock,zleceniodawca);
         msg.sender = mpi_rank;
         msg.flag = TAKE_ORDER_FLAG;
         msg.data[0] = queue_lamport[0];
@@ -183,13 +186,15 @@ int try_take_order()
         }
         return 1;
     }
+    else
+        printf("[W][%d][%d] Nie dostalem zlecenia %d\n",mpi_rank,lamport_clock,zleceniodawca);
     return 0;
 }
 
 void *wolontariusz_Komunikacja(void *ptr)
 {
     //printf("----------------Start komunikacja wolon\n");
-
+    printf("[W][%d][%d] startuje watek komunikacja\n",mpi_rank,lamport_clock);
     MPI_Status status;
     struct Msg rec;
     
@@ -200,7 +205,7 @@ void *wolontariusz_Komunikacja(void *ptr)
         lamport_clock= max(lamport_clock,rec.lamport)+1;
         pthread_mutex_unlock( &lamportMut );
 
-        printf("Ja %d otrzymalem %d od %d\n",mpi_rank,rec.flag,rec.sender);
+        //printf("Ja %d otrzymalem %d od %d\n",mpi_rank,rec.flag,rec.sender);
         switch (rec.flag)
         {
         case SING_UP_FLAG:
@@ -218,7 +223,8 @@ void *wolontariusz_Komunikacja(void *ptr)
             MPI_Send(&m,sizeof(m),MPI_BYTE,rec.sender, PRIV_TAG, MPI_COMM_WORLD);
             break;
         case MAKE_ORDER_FLAG: // poeta prosi o sprzatanie
-            printf("Ja %d otrzymalem prosbe o sprzatanie od %d\n",mpi_rank,rec.sender);
+            // printf("Ja %d otrzymalem prosbe o sprzatanie od %d\n",mpi_rank,rec.sender);
+            //printf("[W][%d][%d] otrzymalem prosbe o sprzatanie od %d\n",mpi_rank,lamport_clock,rec.sender);
             pthread_mutex_lock( &queueMut );
             pthread_mutex_lock( &stateMut );
             if(queue_rank[0]==mpi_rank && wolontariusz_stan==IN_WAIT_STATUS)
@@ -280,13 +286,13 @@ void *wolontariusz_Komunikacja(void *ptr)
                 MPI_Send(&m,sizeof(m),MPI_BYTE,rec.sender, PARTY_TAG, MPI_COMM_WORLD);
 
             }
-            printf("Koniec----------------------------------------------------------|\n");
+            //printf("Koniec----------------------------------------------------------|\n");
             break;
         case TAKE_ORDER_FLAG:
             delete_from_queue(rec.sender,rec.data[0]);
             break;
         default:
-            printf("Odebrano wiadomosc od %d z flaga %d",rec.sender,rec.flag);
+            //printf("Odebrano wiadomosc od %d z flaga %d",rec.sender,rec.flag);
             break;
         }
     }
@@ -294,8 +300,10 @@ void *wolontariusz_Komunikacja(void *ptr)
 
 void sprzataj()
 {
-    int czas = rand_num(500,3000);
+    int czas = rand_num(time_sprzatanie[0],time_sprzatanie[1]);
 
+    printf("[W][%d][%d] Losuje czas sprzatania: %d\n",mpi_rank,lamport_clock,czas);
+    
     struct Msg msg;
 
     msg.data[0]=czas;
@@ -307,9 +315,13 @@ void sprzataj()
     msg.flag = TAKE_ORDER_FLAG;
 
     MPI_Send(&msg,sizeof(msg),MPI_BYTE,zleceniodawca, PARTY_TAG, MPI_COMM_WORLD);
-    printf("Wyslano do %d\n",zleceniodawca);
+    //printf("Wyslano do %d\n",zleceniodawca);
+    printf("[W][%d][%d] Wyslalem czas sprzatania do %d\n",mpi_rank,lamport_clock,zleceniodawca);
+    printf("[W][%d][%d] Sprzatam przez %d\n",mpi_rank,lamport_clock,czas);
 
     wait(czas);
+
+    printf("[W][%d][%d] Posprzatalem, wysylam potwierdzenie\n",mpi_rank,lamport_clock);
 
     pthread_mutex_lock( &lamportMut );
     lamport_clock+=1;
@@ -321,6 +333,7 @@ void sprzataj()
 
 void *wolontariusz_main(void *ptr)
 {
+    printf("[W][%d][%d] startuje watek glowny\n",mpi_rank,lamport_clock);
     sing_up();
     while(2+2)
     {
